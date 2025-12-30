@@ -1,0 +1,23 @@
+# Agent Configuration - Deployment Team Only
+# This file defines what agent to deploy WITHOUT requiring code changes.
+# Agent development team maintains the agent code separately.
+
+agent:
+  # Package containing the agent code (will be bundled as extra_packages)
+  source_package: "healthcare_agent"
+
+  # Module path where the agent object is defined
+  entrypoint_module: "healthcare_agent.agent"
+
+  # Name of the agent object to deploy (must be an ADK Agent instance)
+  entrypoint_object: "root_agent"
+
+  # Path to agent-specific requirements (relative to project root)
+  requirements_file: "healthcare_agent/requirements.txt"
+
+  # Description shown in Vertex AI console
+  description: "Healthcare Intake Agent"
+
+# Environment variables to pass to the deployed agent (optional)
+# Add any agent-specific env vars here
+env_vars: {}

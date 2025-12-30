@@ -1,4 +1,12 @@
-"""Deploy agent to Vertex AI Agent Engine."""
+"""Deploy agent to Vertex AI Agent Engine.
+
+This deployment script is agent-agnostic. It reads agent specification
+from agent_config.yaml and deploys without hardcoded imports.
+
+Deployment team only needs to configure:
+- .env.prod: GCP settings (project, location, bucket, agent name)
+- agent_config.yaml: Agent specification (package, module, object)
+"""
 
 import argparse
 import datetime
@@ -15,8 +23,7 @@ import vertexai
 from vertexai import agent_engines
 from vertexai.agent_engines import AdkApp
 
-from healthcare_agent.agent import root_agent
-from deployment.config import load_config, update_env_file
+from deployment.config import load_config, load_agent_from_spec, update_env_file
 
 _PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -40,8 +47,8 @@ def _print_deployment_error(error: Exception, deployment_config) -> None:
     """Print helpful error information for deployment failures."""
     import re
     error_str = str(error)
-    print(f"\n❌ Deployment failed: {error}")
-    
+    print(f"\n Deployment failed: {error}")
+
     # Extract reasoning engine ID if available
     engine_match = re.search(r'reasoningEngines/(\d+)', error_str)
     if engine_match:
@@ -53,18 +60,19 @@ def _print_deployment_error(error: Exception, deployment_config) -> None:
             f"resource.labels.reasoning_engine_id%3D%22{engine_id}%22%20"
             f"severity%3E%3DERROR"
         )
-        print(f"\n🔍 View detailed error logs:")
+        print(f"\n View detailed error logs:")
         print(f"   {log_url}")
-    
-    print(f"\n💡 Common causes:")
-    print(f"   • Missing or incompatible dependencies in requirements.txt")
-    print(f"   • Agent code has import errors or syntax issues")
-    print(f"   • Service account lacks required permissions")
-    print(f"   • Invalid environment variables")
-    print(f"\n💡 Troubleshooting steps:")
+
+    agent_spec = deployment_config.agent_spec
+    print(f"\n Common causes:")
+    print(f"   - Missing or incompatible dependencies in {agent_spec.requirements_file}")
+    print(f"   - Agent code has import errors or syntax issues")
+    print(f"   - Service account lacks required permissions")
+    print(f"   - Invalid environment variables")
+    print(f"\n Troubleshooting steps:")
     print(f"   1. Check the logs at the URL above for specific errors")
-    print(f"   2. Verify all dependencies in requirements.txt are compatible")
-    print(f"   3. Test agent code locally: python3 -c 'from healthcare_agent.agent import root_agent'")
+    print(f"   2. Verify all dependencies in {agent_spec.requirements_file} are compatible")
+    print(f"   3. Test agent code locally: python3 -c 'from {agent_spec.entrypoint_module} import {agent_spec.entrypoint_object}'")
     print(f"   4. Ensure service account has roles/aiplatform.user permission")
 
 
@@ -78,11 +86,15 @@ def deploy(force_recreate: bool = False) -> agent_engines.AgentEngine:
     print("Deploying to Vertex AI Agent Engine")
     print(f"{'=' * 50}\n")
 
-    # Load configuration
+    # Load configuration (env + agent_config.yaml)
     deployment_config = load_config()
+    agent_spec = deployment_config.agent_spec
+
     print(f"Agent: {deployment_config.agent_name}")
     print(f"Project: {deployment_config.project}")
-    print(f"Location: {deployment_config.location}\n")
+    print(f"Location: {deployment_config.location}")
+    print(f"Source Package: {agent_spec.source_package}")
+    print(f"Entrypoint: {agent_spec.entrypoint_module}:{agent_spec.entrypoint_object}\n")
 
     # Enable required APIs
     enable_required_apis(deployment_config.project)
@@ -108,24 +120,26 @@ def deploy(force_recreate: bool = False) -> agent_engines.AgentEngine:
         staging_bucket=f"gs://{staging_bucket}",
     )
 
-    # Read requirements
-    requirements_path = _PROJECT_ROOT / deployment_config.requirements_file
+    # Read requirements from agent-specific file
+    requirements_path = _PROJECT_ROOT / agent_spec.requirements_file
+    if not requirements_path.exists():
+        raise FileNotFoundError(
+            f"Agent requirements file not found: {requirements_path}\n"
+            f"Create {agent_spec.requirements_file} with agent dependencies."
+        )
     requirements = [
         line.strip()
         for line in requirements_path.read_text().splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
 
-    # Validate agent can be imported and initialized
+    # Validate agent can be imported and initialized (dynamic loading)
     print("\nValidating agent code...")
     try:
-        # Test that agent can be imported and initialized
-        from healthcare_agent.agent import root_agent as test_agent
-        if test_agent is None:
-            raise ValueError("root_agent is None")
-        print("  ✓ Agent code validated")
+        root_agent = load_agent_from_spec(agent_spec)
+        print(f"  Agent loaded: {agent_spec.entrypoint_module}:{agent_spec.entrypoint_object}")
     except Exception as e:
-        print(f"  ❌ Agent validation failed: {e}")
+        print(f"  Agent validation failed: {e}")
         print(f"  Please fix agent code before deploying")
         raise
 
@@ -138,14 +152,9 @@ def deploy(force_recreate: bool = False) -> agent_engines.AgentEngine:
     deploy_kwargs = {
         "agent_engine": agent_engine,
         "display_name": deployment_config.agent_name,
-        "description": "Healthcare Intake Agent",
-        "extra_packages": ["healthcare_agent"],
-        "env_vars": {
-            "NUM_WORKERS": os.getenv("NUM_WORKERS", "1"),
-            "GCP_PROJECT_ID": deployment_config.project,
-            "GCP_LOCATION": deployment_config.location,
-            "AGENT_NAME": deployment_config.agent_name,
-        },
+        "description": agent_spec.description,
+        "extra_packages": [agent_spec.source_package],
+        "env_vars": deployment_config.env_vars,
         "requirements": requirements,
     }
 
@@ -204,6 +213,11 @@ def deploy(force_recreate: bool = False) -> agent_engines.AgentEngine:
         "project": deployment_config.project,
         "location": deployment_config.location,
         "service_account": service_account,
+        "agent_spec": {
+            "source_package": agent_spec.source_package,
+            "entrypoint_module": agent_spec.entrypoint_module,
+            "entrypoint_object": agent_spec.entrypoint_object,
+        },
     }
 
     (logs_dir / "deployment_metadata.json").write_text(json.dumps(metadata, indent=2))

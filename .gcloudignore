@@ -1,0 +1,35 @@
+# Git and ignore files
+.gcloudignore
+.git
+.gitignore
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment files (local secrets)
+.env.local
+.env.prod
+.env
+
+# Logs and metadata
+logs/
+*.log
+deployment_metadata.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in deployment)
+README.md
+SYSTEM.md

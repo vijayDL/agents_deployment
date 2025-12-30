@@ -1,0 +1,30 @@
+[project]
+name = "agents-deployment"
+version = "0.1.0"
+description = "Vertex AI Agent Engine deployment framework"
+requires-python = ">=3.11"
+
+dependencies = [
+    # Core deployment
+    "google-cloud-aiplatform[agent_engines,adk]==1.132.0",
+    "cloudpickle==3.1.2",
+    "pydantic==2.12.5",
+    "python-dotenv==1.1.0",
+    "pyyaml==6.0.2",
+    # GCP utilities (for deployment scripts)
+    "google-cloud-iam==2.17.0",
+    "google-cloud-storage==2.19.0",
+    "google-cloud-resource-manager==1.14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.8.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "ruff>=0.8.0",
+]

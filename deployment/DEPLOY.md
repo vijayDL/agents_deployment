@@ -1,100 +1,125 @@
-# Deployment Guide: Healthcare Intake Reasoning Engine
+# Deployment Guide: Vertex AI Agent Engine
 
-Technical documentation for deploying the Healthcare Agent to **Google Vertex AI**.
+Technical documentation for deploying agents to **Google Vertex AI Agent Engine**.
 
 ---
 
-## Technical Context
+## Architecture Overview
 
-This project uses the **Google ADK (Agent Development Kit)** to deploy a Python-based agent as a **Vertex AI Reasoning Engine**.
+This project separates concerns between **Agent Team** and **Deployment Team**:
 
-### Tech Stack
+```
+Agent Team                         Deployment Team
+─────────────                      ────────────────
+healthcare_agent/                  deployment/
+├── agent.py (root_agent)          ├── agent_config.yaml
+└── requirements.txt               ├── deploy.py
+                                   └── .env.prod
+```
+
+- **Agent Team**: Writes agent code, no deployment knowledge needed
+- **Deployment Team**: Configures and deploys via YAML, no code imports needed
+
+---
+
+## Tech Stack
+
 - **Language**: Python 3.11 (Required for `cloudpickle` compatibility)
 - **Model**: Gemini 2.5 Flash
 - **Framework**: Google ADK / `AdkApp`
 - **Infrastructure**: Vertex AI Reasoning Engine (Serverless)
 - **Session Storage**: `VertexAiSessionService` (Firestore-backed)
-- **Observability**: OpenTelemetry with Google Cloud Trace
+- **Package Manager**: uv (local dev)
 
 ---
 
-## Development Workflow
+## Configuration Files
 
-### 1. Initial Agent Scaffolding (Local Setup)
-The `adk` command-line tool generates the local folder structure:
-```bash
-adk create healthcare_agent
+### 1. Agent Specification (`deployment/agent_config.yaml`)
+
+Defines which agent to deploy without code imports:
+
+```yaml
+agent:
+  source_package: "healthcare_agent"
+  entrypoint_module: "healthcare_agent.agent"
+  entrypoint_object: "root_agent"
+  requirements_file: "healthcare_agent/requirements.txt"
+  description: "Healthcare Intake Agent"
+
+env_vars: {}
 ```
 
-### 2. Cloud Deployment
+| Field | Description |
+|-------|-------------|
+| `source_package` | Package directory to bundle |
+| `entrypoint_module` | Python module path |
+| `entrypoint_object` | Agent object name to load |
+| `requirements_file` | Agent runtime dependencies |
+| `description` | Display in Vertex AI console |
+| `env_vars` | Additional environment variables |
 
-The `deployment/` module handles deployment to Google Cloud:
+### 2. Environment Variables (`.env.prod`)
 
+All variables are **required** (no defaults):
+
+```text
+AGENT_NAME=Healthcare-bot
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+GOOGLE_CLOUD_STAGING_BUCKET=your-staging-bucket
 ```
-deployment/
-├── deploy.py      # Main entry point
-├── app.py         # AgentEngineApp wrapper
-├── config.py      # Configuration management
-├── tracing.py     # Cloud Trace integration
-└── gcp/           # GCP utilities (APIs, Storage, IAM)
-```
-
-Features:
-- Automatic API enablement
-- Service account management with IAM roles
-- Staging bucket creation
-
----
-
-## Environment Variables
-
-Create `.env.prod` in the project root.
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `GOOGLE_CLOUD_PROJECT` | GCP Project ID | Yes |
-| `GOOGLE_CLOUD_LOCATION` | Deployment Region (e.g., `us-central1`) | Yes |
-| `GOOGLE_CLOUD_STAGING_BUCKET` | GCS bucket for staging artifacts | Yes |
-| `NUM_WORKERS` | Worker count for the engine (default: 1) | No |
-| `AGENT_NAME` | Display name for the agent | No |
-| `GOOGLE_GENAI_USE_VERTEXAI` | Set to `TRUE` for Vertex AI | Yes |
-
----
-
-## Critical Pre-Deployment Rules
-
-### 1. Requirements Sanitization
-
-Vertex AI fails if `requirements.txt` contains inline comments. The deployment script handles this automatically, but if needed manually:
-
-```bash
-# Mac/Linux
-sed -i '' 's/ #.*//' requirements.txt
-```
-
-### 2. The "Slim Build" Architecture
-
-- **`requirements.txt`**: Keep minimal (core libraries only)
-- **`healthcare_agent/__init__.py`**: **MUST remain empty (0 bytes)**
-- This ensures the Cloud environment is ready before importing agent code
 
 ---
 
 ## Deployment Commands
 
 ```bash
+# Install dependencies
+uv sync
+
 # Deploy to Vertex AI
-python3 deployment/deploy.py
+uv run python deployment/deploy.py
 
 # Force recreate (deletes existing agent first)
-python3 deployment/deploy.py --force-recreate
+uv run python deployment/deploy.py --force-recreate
 ```
 
 ---
 
-## Post-Deployment Testing
+## Deployment Flow
 
-The agent uses a **Stateful Session Protocol**.
+The `deploy.py` script:
+
+1. Loads `.env.prod` (GCP settings)
+2. Loads `agent_config.yaml` (agent specification)
+3. Enables required GCP APIs
+4. Creates/reuses staging bucket
+5. Sets up service account with IAM roles
+6. **Dynamically loads agent** from `entrypoint_module:entrypoint_object`
+7. Deploys to Vertex AI Agent Engine
+8. Saves metadata to `logs/deployment_metadata.json`
+
+---
+
+## Deploying a Different Agent
+
+To deploy a new agent, the Deployment Team only updates `agent_config.yaml`:
+
+```yaml
+agent:
+  source_package: "my_new_agent"
+  entrypoint_module: "my_new_agent.main"
+  entrypoint_object: "agent"
+  requirements_file: "my_new_agent/requirements.txt"
+  description: "My New Agent"
+```
+
+No changes to `deploy.py` required.
+
+---
+
+## Post-Deployment Testing
 
 ### 1. Create Session
 
@@ -118,10 +143,17 @@ curl -X POST \
 
 ---
 
+## Troubleshooting
+
+Check logs at: https://console.cloud.google.com/logs/
+
+---
+
 ## Important Constraints
 
 | Rule | Reason |
 |------|--------|
 | `healthcare_agent/__init__.py` must be empty | Prevents `ModuleNotFoundError` during cloud build |
 | Python 3.11 required | `cloudpickle` compatibility with Vertex AI |
-| No hardcoded credentials | Use environment variables via `.env.prod` |
+| No hardcoded credentials | Use `.env.prod` for all config |
+| All env vars required | No defaults in code |

@@ -1,8 +1,0 @@
-{
-  "resource_name": "projects/1072833643936/locations/us-central1/reasoningEngines/7044392878277132288",
-  "timestamp": "2025-12-30T11:23:31.846388+00:00",
-  "agent_name": "Healthcare-bot",
-  "project": "framebyframe-agents-480720",
-  "location": "us-central1",
-  "service_account": "healthcare-bot-sa@framebyframe-agents-480720.iam.gserviceaccount.com"
-}
